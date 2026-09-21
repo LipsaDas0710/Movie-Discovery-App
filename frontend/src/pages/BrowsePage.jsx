@@ -1,33 +1,38 @@
 import { useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { fetchHome } from '../api/movies.api';
-import { GENRES } from '../api/mockData';
+import useGenres from '../hooks/useGenres';
+import Poster from '../components/ui/Poster';
 import MovieCard from '../components/movies/MovieCard';
 import { useWishlist } from '../context/WishlistContext';
 import { GridSkeleton, ErrorState } from '../components/ui/States';
-import { toneFor } from '../utils/format';
+import { formatRating } from '../utils/format';
 
 export default function BrowsePage() {
   const navigate = useNavigate();
   const wishlist = useWishlist();
-  const { data, isPending, isError, refetch } = useQuery({ queryKey: ['home'], queryFn: fetchHome });
+  const genres = useGenres();
+  const { data, error, isPending, isError, refetch } = useQuery({ queryKey: ['home'], queryFn: fetchHome });
 
   if (isPending) return <main className="page"><GridSkeleton count={6} /></main>;
-  if (isError) return <main className="page"><ErrorState onRetry={refetch} /></main>;
+  if (isError) return <main className="page"><ErrorState error={error} onRetry={refetch} /></main>;
 
   const { featured, rows } = data;
-  const saved = wishlist.has(featured.id);
+  const saved = featured ? wishlist.has(featured.id) : false;
 
   return (
     <main className="page">
+      {featured && (
       <section className="hero">
         <div className="hero-stripes" />
+        {featured.backdropUrl && <div className="hero-bg" style={{ backgroundImage: `url(${featured.backdropUrl})` }} />}
         <div className="hero-copy">
           <span className="eyebrow">Featured today</span>
           <h1 className="hero-title">{featured.title}</h1>
           <div className="meta-row">
-            <span className="rating">★ {featured.rating.toFixed(1)}</span>
-            <span>{featured.year}</span><span>·</span><span>{featured.runtime}</span><span>·</span><span>{featured.genres}</span>
+            {featured.rating != null && <span className="rating">★ {formatRating(featured.rating)}</span>}
+            {featured.year && <span>{featured.year}</span>}
+            {featured.genres.length > 0 && <><span>·</span><span>{featured.genres.slice(0, 3).join(', ')}</span></>}
           </div>
           <p className="hero-synopsis">{featured.synopsis}</p>
           <div className="hero-actions">
@@ -39,20 +44,15 @@ export default function BrowsePage() {
             </button>
           </div>
         </div>
-        <div className="poster hero-poster" style={{ backgroundColor: toneFor(featured.id) }}>
-          <span className="poster-label">poster · 2:3</span>
-        </div>
+        <Poster movie={featured} className="hero-poster" />
       </section>
+      )}
 
       <div className="chips-wrap">
-        {GENRES.map((g) => (
-          <button
-            type="button"
-            key={g}
-            className="chip"
-            onClick={() => navigate(g === 'All' ? '/explore' : `/explore?genre=${encodeURIComponent(g)}`)}
-          >
-            {g}
+        <button type="button" className="chip" onClick={() => navigate('/explore')}>All</button>
+        {genres.map((g) => (
+          <button type="button" key={g.id} className="chip" onClick={() => navigate(`/explore?genre=${g.id}`)}>
+            {g.name}
           </button>
         ))}
       </div>

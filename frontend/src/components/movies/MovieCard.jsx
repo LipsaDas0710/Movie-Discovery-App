@@ -1,6 +1,7 @@
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useWishlist } from '../../context/WishlistContext';
-import { metaLine, toneFor } from '../../utils/format';
+import { metaLine } from '../../utils/format';
+import Poster from '../ui/Poster';
 
 // variant: 'row' (home carousels) | 'grid' (explore / wishlist) | 'similar' (detail page, no heart)
 export default function MovieCard({ movie, variant = 'grid' }) {
@@ -19,7 +20,7 @@ export default function MovieCard({ movie, variant = 'grid' }) {
       onClick={open}
       onKeyDown={(e) => e.key === 'Enter' && open()}
     >
-      <div className="poster" style={{ backgroundColor: toneFor(movie.id) }}>
+      <Poster movie={movie}>
         {variant !== 'similar' && (
           <button
             type="button"
@@ -34,8 +35,7 @@ export default function MovieCard({ movie, variant = 'grid' }) {
             ♥
           </button>
         )}
-        {variant !== 'similar' && <span className="poster-label">poster</span>}
-      </div>
+      </Poster>
       <div className="card-info">
         <span className="card-title" title={movie.title}>{movie.title}</span>
         <span className="card-meta">{metaLine(movie)}</span>

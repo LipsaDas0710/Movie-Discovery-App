@@ -12,13 +12,13 @@ export function GridSkeleton({ count = 12, className = '' }) {
   );
 }
 
-export function ErrorState({ onRetry }) {
+export function ErrorState({ error, onRetry }) {
   return (
     <div className="state-box error" role="alert">
       <span className="state-title">We couldn’t reach the catalogue</span>
-      <span className="state-text">The movie service didn’t respond. Your wishlist is saved and nothing was lost.</span>
+      <span className="state-text">{error?.message || 'The movie service didn’t respond.'} Your wishlist is saved and nothing was lost.</span>
       <button type="button" className="btn-primary" onClick={onRetry} style={{ marginTop: 4 }}>Retry</button>
-      <span className="state-code">error 503 · request timed out</span>
+      {error?.status !== undefined && <span className="state-code">error {error.status || 'offline'}{error.code ? ` · ${error.code}` : ''}</span>}
     </div>
   );
 }
