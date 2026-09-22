@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { useAuth } from '../../context/AuthContext';
 
 export default function AuthModal() {
-  const { modal, closeAuth, setMode, signIn } = useAuth();
+  const { modal, closeAuth, setMode, submit, pending } = useAuth();
   const [form, setForm] = useState({ name: '', email: '', pass: '' });
   const signup = modal.mode === 'signup';
 
@@ -15,15 +15,14 @@ export default function AuthModal() {
 
   if (!modal.open) return null;
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
-  const submit = (e) => {
+  const onSubmit = (e) => {
     e.preventDefault();
-    signIn(form);
-    setForm((f) => ({ ...f, pass: '' }));
+    submit(form);
   };
 
   return (
     <div className="overlay" onMouseDown={(e) => e.target === e.currentTarget && closeAuth()}>
-      <form className="modal" role="dialog" aria-modal="true" aria-labelledby="auth-title" onSubmit={submit}>
+      <form className="modal" role="dialog" aria-modal="true" aria-labelledby="auth-title" onSubmit={onSubmit}>
         <button type="button" className="modal-close" onClick={closeAuth} aria-label="Close">✕</button>
         <div className="modal-brand"><i /><span>Cineverse</span></div>
         <div>
@@ -32,24 +31,35 @@ export default function AuthModal() {
             {signup ? 'Save films, rate what you watch, get better picks.' : 'Your wishlist and ratings follow you to any device.'}
           </p>
         </div>
+        {modal.error && <p className="form-error" role="alert">{modal.error}</p>}
         <div className="form">
           {signup && (
             <label className="field">
               <span>Name</span>
-              <input value={form.name} onChange={set('name')} placeholder="Alex Reyes" autoComplete="name" />
+              <input value={form.name} onChange={set('name')} placeholder="Alex Reyes" autoComplete="name" required />
             </label>
           )}
           <label className="field">
             <span>Email</span>
-            <input type="email" value={form.email} onChange={set('email')} placeholder="you@example.com" autoComplete="email" />
+            <input type="email" value={form.email} onChange={set('email')} placeholder="you@example.com" autoComplete="email" required />
           </label>
           <label className="field">
             <span>Password</span>
-            <input type="password" value={form.pass} onChange={set('pass')} placeholder="••••••••" autoComplete={signup ? 'new-password' : 'current-password'} />
+            <input
+              type="password"
+              value={form.pass}
+              onChange={set('pass')}
+              placeholder="••••••••"
+              autoComplete={signup ? 'new-password' : 'current-password'}
+              minLength={signup ? 8 : undefined}
+              required
+            />
           </label>
           {!signup && <a href="#" className="forgot" onClick={(e) => e.preventDefault()}>Forgot password?</a>}
         </div>
-        <button type="submit" className="modal-cta">{signup ? 'Create account' : 'Sign in'}</button>
+        <button type="submit" className="modal-cta" disabled={pending}>
+          {pending ? 'Please wait…' : signup ? 'Create account' : 'Sign in'}
+        </button>
         <div className="modal-switch">
           <span>{signup ? 'Already have an account?' : 'New to Cineverse?'}</span>
           <button type="button" onClick={() => setMode(signup ? 'signin' : 'signup')}>

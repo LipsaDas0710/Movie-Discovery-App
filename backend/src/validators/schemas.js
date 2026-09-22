@@ -10,9 +10,24 @@ const searchQuery = z.object({
   page: z.coerce.number().int().min(1).max(500).default(1),
 });
 
+const email = z.string().trim().toLowerCase().email().max(200);
+
 module.exports = {
   searchQuery,
   movieParams: z.object({ id: movieId }),
   wishlistBody: z.object({ movieId }),
   wishlistParams: z.object({ movieId }),
+  authRegister: z.object({
+    email,
+    password: z.string().min(8, 'must be at least 8 characters').max(200),
+    displayName: z.string().trim().min(1).max(40),
+  }),
+  authLogin: z.object({
+    email,
+    password: z.string().min(1).max(200),
+  }),
+  reviewBody: z.object({
+    rating: z.coerce.number().int().min(1).max(10),
+    text: z.string().trim().min(1).max(2000),
+  }),
 };

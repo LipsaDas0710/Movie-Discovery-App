@@ -127,3 +127,85 @@ test('unknown route returns JSON 404', async () => {
   const res = await request(app).get('/api/nope').expect(404);
   assert.equal(res.body.error.code, 'NOT_FOUND');
 });
+
+// ---------- auth + reviews ----------
+// Models aren't hit against a real database here; User.findById/authService are stubbed,
+// the same way tmdb.get is stubbed above. Real DB behaviour is checked manually against Atlas.
+const sign = require('cookie-signature').sign;
+const User = require('../src/models/User');
+const authService = require('../src/services/auth.service');
+const reviewsService = require('../src/services/reviews.service');
+const COOKIE_SECRET = process.env.COOKIE_SECRET;
+
+const sessionCookie = (userId) => `cv_session=s:${sign(userId, COOKIE_SECRET)}`;
+
+test('register validates input (short password, bad email)', async () => {
+  await request(app).post('/api/auth/register').send({ email: 'not-an-email', password: 'longenough', displayName: 'A' }).expect(400);
+  await request(app).post('/api/auth/register').send({ email: 'a@b.com', password: 'short', displayName: 'A' }).expect(400);
+});
+
+test('auth writes reject foreign origins (CSRF guard)', async () => {
+  await request(app).post('/api/auth/register').set('Origin', 'https://evil.example').send({ email: 'a@b.com', password: 'longenough1', displayName: 'A' }).expect(403);
+  await request(app).post('/api/auth/login').set('Origin', 'https://evil.example').send({ email: 'a@b.com', password: 'longenough1' }).expect(403);
+});
+
+test('register sets a session cookie; duplicate email is rejected with 409', async () => {
+  authService.register = async (email, _password, displayName) => ({ id: 'user-1', email, displayName });
+  const res = await request(app).post('/api/auth/register').send({ email: 'new@example.com', password: 'longenough1', displayName: 'Nia' }).expect(201);
+  assert.match(res.headers['set-cookie'][0], /cv_session=/);
+  assert.equal(res.body.user.email, 'new@example.com');
+
+  authService.register = async () => { throw new AppError(409, 'EMAIL_TAKEN', 'An account with this email already exists'); };
+  const dup = await request(app).post('/api/auth/register').send({ email: 'new@example.com', password: 'longenough1', displayName: 'Nia' }).expect(409);
+  assert.equal(dup.body.error.code, 'EMAIL_TAKEN');
+});
+
+test('login rejects wrong credentials with 401 and never reveals which part was wrong', async () => {
+  authService.login = async () => { throw new AppError(401, 'INVALID_CREDENTIALS', 'Email or password is incorrect'); };
+  await request(app).post('/api/auth/login').send({ email: 'a@b.com', password: 'wrongpassword' }).expect(401);
+});
+
+test('GET /api/auth/me returns null when logged out, the account when the session cookie is valid', async () => {
+  const anon = await request(app).get('/api/auth/me').expect(200);
+  assert.equal(anon.body.user, null);
+
+  User.findById = () => ({ lean: () => Promise.resolve({ _id: 'user-1', email: 'nia@example.com', displayName: 'Nia' }) });
+  const res = await request(app).get('/api/auth/me').set('Cookie', sessionCookie('user-1')).expect(200);
+  assert.equal(res.body.user.displayName, 'Nia');
+});
+
+test('posting a review requires being signed in', async () => {
+  User.findById = () => ({ lean: () => Promise.resolve(null) }); // cookie present but account gone
+  await request(app).post('/api/movies/5/reviews').set('Cookie', sessionCookie('ghost')).send({ rating: 8, text: 'Great' }).expect(401);
+  await request(app).post('/api/movies/5/reviews').send({ rating: 8, text: 'Great' }).expect(401);
+});
+
+test('a signed-in user can post a review, and it comes back flagged as theirs alongside everyone else\'s', async () => {
+  User.findById = () => ({ lean: () => Promise.resolve({ _id: 'user-1', email: 'nia@example.com', displayName: 'Nia' }) });
+  reviewsService.upsert = async (userId, authorName, movieId, { rating, text }) =>
+    ({ id: 'r1', movieId, userId, authorName, rating, text, createdAt: new Date(), updatedAt: new Date() });
+
+  const posted = await request(app)
+    .post('/api/movies/5/reviews')
+    .set('Cookie', sessionCookie('user-1'))
+    .send({ rating: 9, text: 'Loved it' })
+    .expect(201);
+  assert.equal(posted.body.item.mine, true);
+  assert.equal(posted.body.item.authorName, 'Nia');
+  assert.equal(posted.body.item.userId, undefined); // never leak another viewer's raw id
+
+  reviewsService.list = async () => [
+    { id: 'r1', movieId: 5, userId: 'user-1', authorName: 'Nia', rating: 9, text: 'Loved it', createdAt: new Date(), updatedAt: new Date() },
+    { id: 'r2', movieId: 5, userId: 'user-2', authorName: 'Priya', rating: 7, text: 'Liked it', createdAt: new Date(), updatedAt: new Date() },
+  ];
+  const list = await request(app).get('/api/movies/5/reviews').set('Cookie', sessionCookie('user-1')).expect(200);
+  assert.equal(list.body.items.length, 2);
+  assert.equal(list.body.items.find((r) => r.id === 'r1').mine, true);
+  assert.equal(list.body.items.find((r) => r.id === 'r2').mine, false);
+});
+
+test('review text is rejected when empty or too long', async () => {
+  User.findById = () => ({ lean: () => Promise.resolve({ _id: 'user-1', email: 'nia@example.com', displayName: 'Nia' }) });
+  await request(app).post('/api/movies/5/reviews').set('Cookie', sessionCookie('user-1')).send({ rating: 5, text: '' }).expect(400);
+  await request(app).post('/api/movies/5/reviews').set('Cookie', sessionCookie('user-1')).send({ rating: 11, text: 'ok' }).expect(400);
+});

@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { fetchMovie } from '../api/movies.api';
-import { REVIEWS } from '../api/reviewsMock';
+import { fetchReviews, postReview } from '../api/reviews.api';
 import { langName } from '../api/filters';
 import MovieCard from '../components/movies/MovieCard';
 import { ErrorState, GridSkeleton } from '../components/ui/States';
@@ -10,7 +10,7 @@ import Poster from '../components/ui/Poster';
 import NotFoundPage from './NotFoundPage';
 import { useAuth } from '../context/AuthContext';
 import { useWishlist } from '../context/WishlistContext';
-import { formatMoney, formatRating, formatRuntime } from '../utils/format';
+import { formatMoney, formatRating, formatRuntime, timeAgo } from '../utils/format';
 
 const BACK_LABELS = { '/': 'Browse', '/explore': 'Explore', '/wishlist': 'Wishlist' };
 
@@ -20,6 +20,7 @@ export default function MovieDetailPage() {
   const { state } = useLocation();
   const { user, openAuth } = useAuth();
   const wishlist = useWishlist();
+  const qc = useQueryClient();
 
   const { data, error, isPending, isError, refetch } = useQuery({
     queryKey: ['movie', id],
@@ -27,8 +28,21 @@ export default function MovieDetailPage() {
     retry: false,
   });
 
-  // Reviews are UI-only (from the design mockup), kept in local state per movie.
-  const [myReviews, setMyReviews] = useState({});
+  // Reviews live in MongoDB: anyone can read a movie's reviews, only a signed-in
+  // account can write one. Posting merges the new one into the already-fetched list.
+  const { data: reviews = [], isPending: reviewsPending } = useQuery({
+    queryKey: ['reviews', id],
+    queryFn: ({ signal }) => fetchReviews(id, signal),
+  });
+  const reviewMutation = useMutation({
+    mutationFn: ({ rating, text }) => postReview(id, { rating, text }),
+    onSuccess: (item) => {
+      qc.setQueryData(['reviews', id], (old = []) => [item, ...old.filter((r) => !r.mine)]);
+      setComposerOpen(false);
+      setDraft({ text: '', score: 8 });
+    },
+  });
+
   const [composerOpen, setComposerOpen] = useState(false);
   const [pendingReview, setPendingReview] = useState(false);
   const [draft, setDraft] = useState({ text: '', score: 8 });
@@ -50,8 +64,7 @@ export default function MovieDetailPage() {
   const from = state?.from || '/';
   const backLabel = BACK_LABELS[from.split('?')[0]] || 'Back';
   const saved = wishlist.has(movie.id);
-  const reviews = [...(myReviews[movie.id] || []), ...REVIEWS];
-  const canPost = draft.text.trim().length > 0;
+  const canPost = draft.text.trim().length > 0 && !reviewMutation.isPending;
 
   const writeReview = () => {
     if (user) setComposerOpen(true);
@@ -60,14 +73,9 @@ export default function MovieDetailPage() {
       openAuth('signin');
     }
   };
-  const postReview = () => {
+  const submitReview = () => {
     if (!canPost) return;
-    setMyReviews((r) => ({
-      ...r,
-      [movie.id]: [{ name: user, when: 'just now', score: draft.score, text: draft.text.trim() }, ...(r[movie.id] || [])],
-    }));
-    setComposerOpen(false);
-    setDraft({ text: '', score: 8 });
+    reviewMutation.mutate({ rating: draft.score, text: draft.text.trim() });
   };
 
   const facts = [
@@ -142,7 +150,10 @@ export default function MovieDetailPage() {
           <div className="reviews-head">
             <h2 className="section-title">Reviews</h2>
             {movie.rating != null && (
-              <span className="reviews-summary">★ {formatRating(movie.rating)} from {movie.voteCount.toLocaleString()} ratings</span>
+              <span className="reviews-summary">
+                ★ {formatRating(movie.rating)} from {movie.voteCount.toLocaleString()} TMDB ratings
+                {reviews.length > 0 && ` · ${reviews.length} review${reviews.length === 1 ? '' : 's'} here`}
+              </span>
             )}
             <div className="spacer" />
             <button type="button" className="btn-outline" style={{ flex: '0 0 auto' }} onClick={writeReview}>
@@ -152,7 +163,7 @@ export default function MovieDetailPage() {
 
           {composerOpen && user && (
             <div className="composer">
-              <div className="avatar md">{user.slice(0, 1).toUpperCase()}</div>
+              <div className="avatar md">{user.displayName.slice(0, 1).toUpperCase()}</div>
               <div className="composer-body">
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                   <div className="stars">
@@ -177,32 +188,44 @@ export default function MovieDetailPage() {
                   onChange={(e) => setDraft((d) => ({ ...d, text: e.target.value }))}
                   placeholder="What did you think? No spoilers in the first paragraph, please."
                 />
+                {reviewMutation.isError && <p className="form-error" role="alert">{reviewMutation.error.message}</p>}
                 <div className="composer-actions">
-                  <button type="button" className="btn-post" disabled={!canPost} onClick={postReview}>Post review</button>
+                  <button type="button" className="btn-post" disabled={!canPost} onClick={submitReview}>
+                    {reviewMutation.isPending ? 'Posting…' : 'Post review'}
+                  </button>
                   <button type="button" className="btn-cancel" onClick={() => { setComposerOpen(false); setDraft((d) => ({ ...d, text: '' })); }}>Cancel</button>
-                  <span className="posting-as">Posting as {user}</span>
+                  <span className="posting-as">Posting as {user.displayName}</span>
                 </div>
               </div>
             </div>
           )}
 
-          <div className="review-grid">
-            {reviews.map((r, i) => (
-              <article className="review" key={`${r.name}-${i}`}>
-                <div className="review-head">
-                  <div className="review-avatar">{r.name.slice(0, 1).toUpperCase()}</div>
-                  <div className="review-who">
-                    <span className="review-name">{r.name}</span>
-                    <span className="review-when">{r.when}</span>
+          {reviewsPending ? (
+            <p className="review-empty">Loading reviews…</p>
+          ) : reviews.length === 0 ? (
+            <p className="review-empty">No reviews yet — be the first to write one.</p>
+          ) : (
+            <div className="review-grid">
+              {reviews.map((r) => (
+                <article className="review" key={r.id}>
+                  <div className="review-head">
+                    <div className="review-avatar">{r.authorName.slice(0, 1).toUpperCase()}</div>
+                    <div className="review-who">
+                      <span className="review-name">
+                        {r.authorName}
+                        {r.mine && <span className="mine-tag"> · you</span>}
+                      </span>
+                      <span className="review-when">{timeAgo(r.createdAt)}</span>
+                    </div>
+                    <div className="spacer" />
+                    <span className="review-score">{r.rating.toFixed(1)}</span>
                   </div>
-                  <div className="spacer" />
-                  <span className="review-score">{r.score.toFixed(1)}</span>
-                </div>
-                <p className="review-text">{r.text}</p>
-                <div className="review-actions"><span>▲ Helpful</span><span>Reply</span></div>
-              </article>
-            ))}
-          </div>
+                  <p className="review-text">{r.text}</p>
+                  <div className="review-actions"><span>▲ Helpful</span><span>Reply</span></div>
+                </article>
+              ))}
+            </div>
+          )}
         </section>
 
         {similar.length > 0 && (

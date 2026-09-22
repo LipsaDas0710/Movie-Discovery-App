@@ -35,7 +35,7 @@ async function add(userId, movieId) {
     const doc = await WishlistItem.findOneAndUpdate(
       { userId, movieId },
       { $setOnInsert: { userId, movieId, snapshot, addedAt: new Date() } },
-      { upsert: true, new: true, lean: true },
+      { upsert: true, returnDocument: 'after', lean: true },
     );
     return toItem(doc);
   } catch (err) {

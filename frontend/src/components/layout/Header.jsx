@@ -79,8 +79,8 @@ export default function Header() {
         </button>
         {user ? (
           <div className="user-pill">
-            <div className="avatar sm">{user.slice(0, 1).toUpperCase()}</div>
-            <span className="user-name">{user}</span>
+            <div className="avatar sm">{user.displayName.slice(0, 1).toUpperCase()}</div>
+            <span className="user-name">{user.displayName}</span>
             <button type="button" className="link-btn" onClick={signOut}>Sign out</button>
           </div>
         ) : (
